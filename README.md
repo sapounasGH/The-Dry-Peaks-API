@@ -228,6 +228,20 @@ Response:
   "status": "DELETE_SUCCESS"
 }
 ```
+---
+
+## Author
+
+**Christos Sapounas**
+
+- GitHub: [@sapounasGH](https://github.com/sapounasGH)
+
+---
+
+## License
+
+This project was developed as a university thesis. All rights reserved unless otherwise stated.
+---
 
 # GREEK VERSION OF README FILE
 # The Dry Peaks API (Ξερή)
