@@ -1,3 +1,235 @@
+# ENGLISH VERSION OF README FILE
+# The Dry Peaks API
+**Christos Sapounas**
+
+## Technologies
+
+* **Backend:** PHP
+* **Database:** MySQL / MariaDB
+* **Data Exchange:** JSON
+
+---
+
+## Overview
+
+"The Dry Peaks API" is a project for the course *Web Systems and Applications Development*. The API is built around the card game **Xeri(Ξερή)**, a classic Greek card game.
+
+### Game Rules
+
+1. Each player is dealt **6 cards** and **4 cards** are placed face-up on the table.
+2. The table cards are visible, but players can only play on top of the **first/top card**.
+3. On their turn, a player throws a card onto the table and **collects all table cards** if:
+   - The thrown card matches the top card on the table.
+   - The thrown card is a **JACK** (value = 12).
+   - **XERI**: If there is only **one card** on the table and the player throws a matching card — that's a Xeri!
+4. When players run out of cards, each is dealt **4 new cards**.
+5. The game ends when there are no more cards on the table, in the deck, or in the players' hands.
+
+The API implements all game rules and exposes the core functions needed by a frontend to render the GUI — including `create`, `reset`, `end`, and `update` game operations, player moves (throwing a card), user management, and various getters for game state.
+
+Communication between frontend and backend is done via **JSON**. For example, to call `getgame()`, the frontend sends:
+
+```json
+{
+  "gameid": "0123456789"
+}
+```
+
+And the backend responds with:
+
+```json
+{
+  "gameid": "0123456789",
+  "p1": "p123123",
+  "p2": "p223123",
+  "turn": "p123123",
+  "deckofcards": "{json with deck of cards}",
+  "boardofcards": "{json with board cards}"
+}
+```
+
+---
+
+## Files & How They Work
+
+### `TheDryPeaks.php`
+The **entry point** of the API. All frontend requests go through this file. It contains a `switch` statement that routes requests to the appropriate handler based on the URL segments between `/`.
+
+For example, to call `getgame()`, the frontend makes a `GET` request to `/TheDryPeaks.php/game/game` with the game ID in the request body. The router then executes:
+
+```php
+if(isset($input['gameid'])){
+    $data = getgame($input['gameid']);
+    echo json_encode($data);
+} else {
+    http_response_code(400);
+    echo json_encode(['error' => 'Missing game id to get game']);
+}
+```
+
+This pattern is repeated for all API functions.
+
+---
+
+### `user.php`
+Contains all functions related to user management.
+
+| Function | Description |
+|----------|-------------|
+| `createuser($username, $pword)` | Inserts a new user into the database with a unique ID. Returns `INSERT_SUCCESS` and the new user ID. |
+| `deleteuser($userid)` | Deletes a user. Returns `DELETE_SUCCESS` and the deleted user's ID. |
+| `checkCredentials($username, $password)` | Validates user login credentials. |
+| `login($userid)` | Issues an authentication token to the user after credentials are verified. |
+| `logout($userid)` | Revokes the user's token (logs them out). |
+| `getIn_game_state($userid)` | Returns whether the user is currently in a game. |
+| `getusername($userid)` | Returns the user's username. |
+| `getpoints($userid)` | Returns the user's total points. |
+| `getUsersGameID($userid)` | Returns the game ID of the game the user is currently in. |
+| `getuserStats($userid)` | Returns the user's username, state, and points. |
+
+---
+
+### `conn.php`
+Connects the PHP application to the MySQL database. Requires a `dbpassag.php` file containing the database credentials:
+
+```php
+<?php
+  $DB_USER = '';
+  $DB_PASS = '';
+  $DB_SOCKET = '';
+  $DB = '';
+  $DB_PORT = ;
+?>
+```
+
+---
+
+### `match.php`
+Handles matchmaking — placing users into a queue to find an opponent. The main function to use is `inqueue($userid)`, which handles everything automatically:
+
+- If another player is already waiting in the queue → returns `GAME_JOINED` and the existing game ID.
+- If no player is waiting → creates a new game and returns `GAME_CREATED` and the new game ID.
+
+The deck is stored in the database when the first player creates the game, and is used when the second player joins.
+
+---
+
+### `game.php`
+The core game file. Contains all functions for creating, resetting, fetching, and updating games, as well as the main gameplay logic.
+
+| Function | Description |
+|----------|-------------|
+| `creategame($user1, $user2)` | Creates a new game by calling `sharecards()`, storing all data in the DB, and updating both players' `in_game_state`. Returns the game ID and the second player's cards. |
+| `endgame($gameid)` | Deletes the game from the database. Returns `DELETE_SUCCESS`. |
+| `resetgame($gameid, $usr1, $usr2)` | Restarts the game with the same players but a new game ID. |
+| `updategame($gameid, $cards, $turn, $boardcards, $gamepoints, $userid, $cardsgathered)` | Updates the game state in the database with new data. |
+| `updategamepoints($userid, $gamepoints)` | Updates the player's points. |
+| `finishgame($gameid)` | Called before `endgame()`. Calculates the winner (or draw) and saves results to `log_game_file` — a history of all completed games. |
+| `sharecards()` | Loads cards from `deck.json`, shuffles them, and distributes them to Player 1, Player 2, the board, and the remaining deck. |
+| `throwcard($gameid, $cardnumber, $token)` | The most important game function. Validates the token, identifies whose turn it is, applies the appropriate game rule based on the top board card, checks if players need new cards or if the game is over, and if the game ends — calls `finishgame()`. Returns the action taken (e.g. `GAINED_CARDS`, `NO_ACTION`), the status (e.g. `PLAYING`, `GAME_OVER`, `ROUND_ENDED`), the card played, and the card it was played on top of. |
+| `RoundShareCards($gameid)` | Called at the end of each round to deal new cards from the stored deck to both players. |
+| `changetoken($gameid)` | Changes the token of the player whose turn it is. Should be called after every `throwcard()` for security. |
+
+---
+
+### `status.php`
+Contains a single function that returns the current game status of a user, identified only by their token.
+
+---
+
+## Recommended API Usage Flow
+
+> (Assumes both users are already logged in with valid tokens)
+
+**1. Player 1 joins the queue:**
+
+`POST /TheDryPeaks.php/match/queue`
+
+Response:
+```json
+{
+  "status": "GAME_CREATED",
+  "gameid": "697bf75650193"
+}
+```
+
+**2. Player 2 joins the queue and gets matched:**
+
+`POST /TheDryPeaks.php/match/queue`
+
+Response:
+```json
+{
+  "status": "GAME_JOINED",
+  "gameid": "697bf75650193"
+}
+```
+
+**3. A player throws a card:**
+
+`POST /TheDryPeaks.php/game/throwcard`
+
+Request:
+```json
+{
+  "gameid": "697bf75650193",
+  "number": 0,
+  "token": "tokenexample"
+}
+```
+
+Response:
+```json
+{
+  "status": "PLAYING",
+  "Card_we_played": { "suit": "hearts", "rank": "9", "value": 9 },
+  "On_top_of": { "suit": "spades", "rank": "2", "value": 2 },
+  "action": "NO_ACTION"
+}
+```
+
+**4. After each move, call `changetoken` to rotate the active player's token for security.**
+
+**5. When the game ends, `throwcard` returns `GAME_OVER`:**
+
+```json
+{
+  "status": "GAME_OVER",
+  "Card_we_played": { "suit": "diamonds", "rank": "King", "value": 13 },
+  "On_top_of": { "suit": "hearts", "rank": "3", "value": 3 },
+  "action": "GAINED_CARDS"
+}
+```
+
+**6. Fetch game results:**
+
+`GET /TheDryPeaks.php/game/results`
+
+Response:
+```json
+{
+  "log_id": "131231321",
+  "time_stamp": "2026-01-30 15:17:16",
+  "user_1_id": "634636",
+  "user_1_score": 32,
+  "user_2_id": "7869867966",
+  "user_2_score": 56,
+  "winner": "7869867966"
+}
+```
+
+**7. Delete the game:**
+
+`DELETE /TheDryPeaks.php/game/endgame`
+
+Response:
+```json
+{
+  "status": "DELETE_SUCCESS"
+}
+```
+
+# GREEK VERSION OF README FILE
 # The Dry Peaks API (Ξερή)
 **Χρήστος Σαπουνάς**
 
